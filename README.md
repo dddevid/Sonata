@@ -1,5 +1,8 @@
 # Sonata Music Server
 
+> [!WARNING]
+> This project is in alpha: expect bugs, frequent changes, and incomplete features. Use at your own risk!
+
 A self-hosted music streaming server fully compatible with the **OpenSubsonic API**, featuring a modern React web UI and a high-performance Go-based media scanner.
 
 ## Features
