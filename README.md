@@ -103,4 +103,4 @@ See `backend/.env.example` for all available configuration options.
 
 ## License
 
-MIT
+This project is open source and available under the **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)** License. See the [LICENSE](LICENSE) file for details.
