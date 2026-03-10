@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Music2, Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff } from 'lucide-react'
 import { authApi } from '@/api'
 import { useAuthStore } from '@/stores/authStore'
 import type { ServerInfo } from '@/types'
+import sonataLogo from '@/assets/sonata-logo.svg'
 
 export default function Login() {
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null)
@@ -45,12 +46,7 @@ export default function Login() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="flex flex-col items-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-primary flex items-center justify-center mb-4 shadow-lg shadow-primary/20">
-            <Music2 size={28} className="text-white" />
-          </div>
-          <h1 className="text-2xl font-bold text-text-primary">
-            {serverInfo?.name || 'Sonata'}
-          </h1>
+          <img src={sonataLogo} alt="Sonata" className="h-14 w-auto mb-4" />
           <p className="text-sm text-text-muted mt-1">Your personal music server</p>
         </div>
 

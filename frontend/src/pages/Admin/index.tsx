@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Users, FolderOpen, BarChart2, RefreshCw, Plus, Trash2, Edit2, X, Check, Loader2 } from 'lucide-react'
+import { Users, FolderOpen, BarChart2, RefreshCw, Plus, Trash2, Edit2, X, Check, Loader2, Terminal, ChevronDown } from 'lucide-react'
 import { adminApi } from '@/api'
 
-type Tab = 'overview' | 'users' | 'libraries'
+type Tab = 'overview' | 'users' | 'libraries' | 'logs'
 
 // ---------- Overview ----------
 function Overview() {
@@ -306,6 +306,88 @@ function LibrariesTab() {
   )
 }
 
+// ---------- Logs ----------
+const LEVEL_STYLES: Record<string, string> = {
+  DEBUG:    'text-text-muted',
+  INFO:     'text-blue-400',
+  WARNING:  'text-yellow-400',
+  ERROR:    'text-red-400',
+  CRITICAL: 'text-red-500 font-bold',
+}
+
+function LogsTab() {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [autoScroll, setAutoScroll] = useState(true)
+  const [filter, setFilter] = useState('')
+
+  const { data, isFetching } = useQuery({
+    queryKey: ['admin', 'logs'],
+    queryFn: () => adminApi.logs(500),
+    refetchInterval: 3000,
+  })
+
+  const logs = (data?.logs ?? []).filter(l =>
+    !filter || l.msg.toLowerCase().includes(filter.toLowerCase()) || l.level.toLowerCase().includes(filter.toLowerCase()) || l.logger.toLowerCase().includes(filter.toLowerCase())
+  )
+
+  useEffect(() => {
+    if (autoScroll && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [logs, autoScroll])
+
+  const handleScroll = useCallback(() => {
+    if (!scrollRef.current) return
+    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current
+    setAutoScroll(scrollHeight - scrollTop - clientHeight < 40)
+  }, [])
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <input
+          type="text"
+          placeholder="Filter logs…"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          className="flex-1 bg-elevated border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-primary/60"
+        />
+        <span className="text-xs text-text-muted whitespace-nowrap">{logs.length} entries</span>
+        {isFetching && <Loader2 size={14} className="animate-spin text-text-muted" />}
+        <button
+          onClick={() => setAutoScroll(true)}
+          title="Scroll to bottom"
+          className={`p-1.5 rounded-md transition-colors ${autoScroll ? 'text-primary-light bg-primary/10' : 'text-text-muted hover:text-text-primary hover:bg-elevated'}`}
+        >
+          <ChevronDown size={16} />
+        </button>
+      </div>
+
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="bg-black/60 border border-border rounded-xl p-4 h-[480px] overflow-y-auto font-mono text-xs space-y-0.5 scrollbar-thin scrollbar-thumb-border"
+      >
+        {logs.length === 0 ? (
+          <p className="text-text-muted text-center pt-10">No log entries yet — they'll appear as the server runs.</p>
+        ) : (
+          logs.map((entry, i) => (
+            <div key={i} className="flex gap-2 leading-5 hover:bg-white/5 rounded px-1">
+              <span className="text-text-muted shrink-0">{entry.ts}</span>
+              <span className={`shrink-0 w-14 text-right uppercase text-[10px] font-semibold leading-5 ${LEVEL_STYLES[entry.level] ?? 'text-text-secondary'}`}>
+                {entry.level}
+              </span>
+              <span className="text-text-muted/60 shrink-0 truncate max-w-[140px]" title={entry.logger}>{entry.logger}</span>
+              <span className="text-text-primary/90 break-all">{entry.msg}</span>
+            </div>
+          ))
+        )}
+      </div>
+      <p className="text-xs text-text-muted">Auto-refreshes every 3 s · last 500 entries</p>
+    </div>
+  )
+}
+
 // ---------- Main Admin Page ----------
 export default function Admin() {
   const [tab, setTab] = useState<Tab>('overview')
@@ -314,6 +396,7 @@ export default function Admin() {
     { key: 'overview', label: 'Overview', icon: <BarChart2 size={15} /> },
     { key: 'users', label: 'Users', icon: <Users size={15} /> },
     { key: 'libraries', label: 'Libraries', icon: <FolderOpen size={15} /> },
+    { key: 'logs', label: 'Logs', icon: <Terminal size={15} /> },
   ]
 
   return (
@@ -344,6 +427,7 @@ export default function Admin() {
       {tab === 'overview' && <Overview />}
       {tab === 'users' && <UsersTab />}
       {tab === 'libraries' && <LibrariesTab />}
+      {tab === 'logs' && <LogsTab />}
     </div>
   )
 }

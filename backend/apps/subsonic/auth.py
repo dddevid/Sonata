@@ -18,6 +18,19 @@ def subsonic_auth(view_func):
     def wrapper(request, *args, **kwargs):
         p = request.GET if request.method == 'GET' else request.POST
 
+        # 1. Fallback for Web UI: JWT in query params
+        jwt_token = p.get('jwt')
+        if jwt_token:
+            from rest_framework_simplejwt.authentication import JWTAuthentication
+            try:
+                validated_token = JWTAuthentication().get_validated_token(jwt_token)
+                user = JWTAuthentication().get_user(validated_token)
+                request.subsonic_user = user
+                return view_func(request, *args, **kwargs)
+            except Exception:
+                return make_error(request, 40, 'Invalid JWT token')
+
+        # 2. Standard Subsonic Auth
         username = p.get('u', '').strip()
         if not username:
             return make_error(request, 10, 'Required parameter missing: u')

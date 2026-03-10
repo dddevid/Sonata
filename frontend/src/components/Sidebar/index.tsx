@@ -5,12 +5,10 @@ import {
   Disc3,
   ListMusic,
   Search,
-  Settings,
   LogOut,
   Shield,
-  Radio,
-  Music2,
 } from 'lucide-react'
+import sonataLogo from '@/assets/sonata-logo.svg'
 import { useAuthStore } from '@/stores/authStore'
 import clsx from 'clsx'
 
@@ -36,9 +34,7 @@ export default function Sidebar() {
       {/* Logo */}
       <div className="px-5 py-5 border-b border-border">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-            <Music2 size={16} className="text-white" />
-          </div>
+          <img src={sonataLogo} alt="Sonata" className="h-8 w-auto" />
           <span className="text-base font-semibold text-text-primary tracking-tight">Sonata</span>
         </div>
       </div>

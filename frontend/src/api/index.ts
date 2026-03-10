@@ -33,9 +33,9 @@ function getSubsonicAuth() {
   }
 
   if (!username || !pass) {
-    return { user: '', pass: '' }
+    return { user: username, pass: '', jwt: state.accessToken }
   }
-  return { user: username, pass }
+  return { user: username, pass, jwt: state.accessToken }
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -72,12 +72,13 @@ export const adminApi = {
   startScan: () => api.post<ScanStatus>('/api/scan/start/').then(r => r.data),
   scanStatus: () => api.get<ScanStatus>('/api/scan/status/').then(r => r.data),
   stats: () => api.get<Stats>('/api/stats/').then(r => r.data),
+  logs: (limit = 200) => api.get<{ logs: { ts: string; level: string; logger: string; msg: string }[] }>(`/api/logs/?limit=${limit}`).then(r => r.data),
 
   getNowPlaying: () => {
-    const { user, pass } = getSubsonicAuth()
+    const { user, pass, jwt } = getSubsonicAuth()
     const salt = generateSalt()
-    const token = md5(pass + salt)
-    const url = `/rest/getNowPlaying?u=${encodeURIComponent(user)}&t=${token}&s=${salt}&v=1.16.1&c=sonata-ui&f=json`
+    const token = pass ? md5(pass + salt) : ''
+    const url = `/rest/getNowPlaying?u=${encodeURIComponent(user)}&t=${token}&s=${salt}&v=1.16.1&c=sonata-ui&f=json${jwt && !pass ? `&jwt=${jwt}` : ''}`
     return api.get(url).then(r => r.data)
   }
 }
@@ -129,16 +130,16 @@ export const radioApi = {
 // ── Stream URL helpers ────────────────────────────────────────────────────────
 
 export function streamUrl(songId: number): string {
-  const { user, pass } = getSubsonicAuth()
+  const { user, pass, jwt } = getSubsonicAuth()
   const salt = generateSalt()
-  const token = md5(pass + salt)
-  return `/rest/stream?id=${songId}&u=${encodeURIComponent(user)}&t=${token}&s=${salt}&v=1.16.1&c=sonata-ui&f=json`
+  const token = pass ? md5(pass + salt) : ''
+  return `/rest/stream?id=${songId}&u=${encodeURIComponent(user)}&t=${token}&s=${salt}&v=1.16.1&c=sonata-ui&f=json${jwt && !pass ? `&jwt=${jwt}` : ''}`
 }
 
 export function coverArtUrl(id: string, size?: number): string {
-  const { user, pass } = getSubsonicAuth()
+  const { user, pass, jwt } = getSubsonicAuth()
   const salt = generateSalt()
-  const token = md5(pass + salt)
+  const token = pass ? md5(pass + salt) : ''
   const sizeParam = size ? `&size=${size}` : ''
-  return `/rest/getCoverArt?id=${encodeURIComponent(id)}&u=${encodeURIComponent(user)}&t=${token}&s=${salt}&v=1.16.1&c=sonata-ui${sizeParam}`
+  return `/rest/getCoverArt?id=${encodeURIComponent(id)}&u=${encodeURIComponent(user)}&t=${token}&s=${salt}&v=1.16.1&c=sonata-ui${sizeParam}${jwt && !pass ? `&jwt=${jwt}` : ''}`
 }

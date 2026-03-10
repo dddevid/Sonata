@@ -1,6 +1,8 @@
 import os
+import logging
 import threading
 import secrets
+from collections import deque
 from django.conf import settings
 from django.utils import timezone
 from rest_framework import status, permissions
@@ -14,6 +16,48 @@ from .serializers import (
     MusicFolderSerializer, ArtistSerializer, AlbumSerializer,
     SongSerializer, PlaylistSerializer, RadioStationSerializer, ScanStatusSerializer,
 )
+
+# ── In-memory log capture ──────────────────────────────────────────────────────
+
+_LOG_BUFFER: deque = deque(maxlen=500)
+_LOG_LOCK = threading.Lock()
+
+LEVEL_COLORS = {
+    'DEBUG': 'debug',
+    'INFO': 'info',
+    'WARNING': 'warning',
+    'ERROR': 'error',
+    'CRITICAL': 'error',
+}
+
+
+class _MemoryLogHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord):
+        try:
+            entry = {
+                'ts': self.formatter.formatTime(record, '%H:%M:%S') if self.formatter else '',
+                'level': record.levelname,
+                'logger': record.name,
+                'msg': self.format(record),
+            }
+            with _LOG_LOCK:
+                _LOG_BUFFER.append(entry)
+        except Exception:
+            pass
+
+
+def _install_log_handler():
+    root = logging.getLogger()
+    for h in root.handlers:
+        if isinstance(h, _MemoryLogHandler):
+            return
+    handler = _MemoryLogHandler()
+    handler.setFormatter(logging.Formatter('%(message)s'))
+    handler.setLevel(logging.DEBUG)
+    root.addHandler(handler)
+
+
+_install_log_handler()
 
 
 def _admin_required(request):
@@ -484,3 +528,20 @@ def cover_art_image(request, art_id: str):
 
     size = request.query_params.get('size')
     return serve_cover_art(art_id, size)
+
+
+# ── Server logs ────────────────────────────────────────────────────────────────
+
+@api_view(['GET'])
+def server_logs(request):
+    """Return the last N log entries from the in-memory buffer. Admin-only."""
+    err = _admin_required(request)
+    if err:
+        return err
+    try:
+        limit = max(1, min(int(request.query_params.get('limit', 200)), 500))
+    except (ValueError, TypeError):
+        limit = 200
+    with _LOG_LOCK:
+        entries = list(_LOG_BUFFER)[-limit:]
+    return Response({'logs': entries})

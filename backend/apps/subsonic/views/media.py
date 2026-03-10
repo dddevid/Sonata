@@ -201,6 +201,11 @@ def hls(request):
 
 def serve_cover_art(art_id, size=None):
     cover_path = None
+    
+    def _add_cache_header(response):
+        # Cache for 30 days
+        response['Cache-Control'] = 'public, max-age=2592000'
+        return response
 
     if art_id.startswith('al-'):
         try:
@@ -220,20 +225,54 @@ def serve_cover_art(art_id, size=None):
             if artist.image_path and os.path.exists(artist.image_path):
                 cover_path = artist.image_path
             elif artist.image_url:
-                from django.http import HttpResponseRedirect
-                return HttpResponseRedirect(artist.image_url)
+                import requests
+                from django.conf import settings
+                try:
+                    r = requests.get(artist.image_url, timeout=10)
+                    r.raise_for_status()
+                    
+                    media_root = getattr(settings, 'MEDIA_ROOT', './media')
+                    art_dir = os.path.join(media_root, 'artist-images')
+                    os.makedirs(art_dir, exist_ok=True)
+                    
+                    ext = '.jpg'
+                    if 'png' in artist.image_url.lower() or 'png' in r.headers.get('content-type', '').lower():
+                        ext = '.png'
+                    file_path = os.path.join(art_dir, f'ar-{artist.pk}{ext}')
+                    
+                    with open(file_path, 'wb') as f:
+                        f.write(r.content)
+                        
+                    artist.image_path = file_path
+                    artist.save(update_fields=['image_path'])
+                    cover_path = file_path
+                except Exception:
+                    pass
         except (Artist.DoesNotExist, ValueError):
             pass
     elif art_id.startswith('pl-'):
-        # Playlist — try first song's album art
+        # Playlist — try to create a collage or return the first song's album art
         from apps.music.models import Playlist
         try:
             pl = Playlist.objects.get(pk=art_id[3:])
-            first_entry = pl.entries.select_related('song__album').first()
-            if first_entry:
-                cover_path = first_entry.song.album.cover_art_path
+            entries = pl.entries.select_related('song__album').order_by('position')
+            paths = []
+            for entry in entries:
+                if getattr(entry.song, 'album', None) and entry.song.album.cover_art_path:
+                    p = entry.song.album.cover_art_path
+                    if os.path.exists(p) and p not in paths:
+                        paths.append(p)
+                        if len(paths) == 4:
+                            break
+            
+            if len(paths) >= 4:
+                return _add_cache_header(_generate_playlist_collage(paths, size))
+            elif len(paths) > 0:
+                cover_path = paths[0]
+            else:
+                return _add_cache_header(_sonata_placeholder())
         except (Playlist.DoesNotExist, ValueError):
-            pass
+            return _add_cache_header(_sonata_placeholder())
 
     if cover_path and os.path.exists(cover_path):
         if size:
@@ -245,10 +284,10 @@ def serve_cover_art(art_id, size=None):
                 buf = io.BytesIO()
                 img.save(buf, format='JPEG', quality=85)
                 buf.seek(0)
-                return HttpResponse(buf.read(), content_type='image/jpeg')
+                return _add_cache_header(HttpResponse(buf.read(), content_type='image/jpeg'))
             except Exception:
                 pass
-        return FileResponse(open(cover_path, 'rb'), content_type='image/jpeg')
+        return _add_cache_header(FileResponse(open(cover_path, 'rb'), content_type='image/jpeg'))
 
     # Default: return embedded cover art from file tags
     if art_id.startswith('al-') or art_id.startswith('mf-'):
@@ -265,11 +304,11 @@ def serve_cover_art(art_id, size=None):
                 song = Song.objects.get(pk=song_id)
                 cover_data, mime = _extract_embedded_cover(song.path)
                 if cover_data:
-                    return HttpResponse(cover_data, content_type=mime)
+                    return _add_cache_header(HttpResponse(cover_data, content_type=mime))
             except Song.DoesNotExist:
                 pass
 
-    return _default_cover()
+    return _add_cache_header(_default_cover())
 
 
 # ── getCoverArt (Subsonic) ─────────────────────────────────────────────────────
@@ -326,6 +365,43 @@ def _default_cover():
   <path d="M110 60 L130 55 L130 80 L110 85 Z" fill="#555"/>
 </svg>'''
     return HttpResponse(svg, content_type='image/svg+xml')
+
+
+def _sonata_placeholder():
+    """Return the Sonata logo as a placeholder."""
+    # The logo is in the root of the project
+    svg_path = os.path.join(settings.BASE_DIR.parent, 'Sonata Logo.svg')
+    if os.path.exists(svg_path):
+        return FileResponse(open(svg_path, 'rb'), content_type='image/svg+xml')
+    return _default_cover()
+
+
+def _generate_playlist_collage(paths, size=None):
+    from PIL import Image
+    import io
+    
+    target_size = int(size) if size else 500
+    half = target_size // 2
+    
+    collage = Image.new('RGB', (target_size, target_size))
+    
+    try:
+        # Paste 4 images in a 2x2 grid
+        positions = [(0, 0), (half, 0), (0, half), (half, half)]
+        
+        for i, path in enumerate(paths):
+            img = Image.open(path).convert('RGB')
+            # Use LANCZOS if available, otherwise fallback (for older PIL)
+            resample = getattr(Image, 'Resampling', Image).LANCZOS
+            img = img.resize((half, half), resample)
+            collage.paste(img, positions[i])
+            
+        buf = io.BytesIO()
+        collage.save(buf, format='JPEG', quality=85)
+        buf.seek(0)
+        return HttpResponse(buf.read(), content_type='image/jpeg')
+    except Exception:
+        return _sonata_placeholder()
 
 
 # ── getLyrics ──────────────────────────────────────────────────────────────────

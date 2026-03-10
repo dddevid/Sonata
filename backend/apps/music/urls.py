@@ -33,4 +33,7 @@ urlpatterns = [
     # Radio
     path('radio/', views.radio_stations),
     path('radio/<int:station_id>/', views.radio_station_detail),
+
+    # Server logs (admin only)
+    path('logs/', views.server_logs),
 ]
