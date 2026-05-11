@@ -5,17 +5,18 @@ import api from './client'
 import { useAuthStore } from '@/stores/authStore'
 import type {
   Artist, Album, Song, Genre, Playlist, RadioStation,
-  MusicFolder, ScanStatus, Stats, User, ServerInfo, LoginResponse,
+  MusicFolder, ScanStatus, Stats, User, ServerInfo, LoginResponse, ServerSettings,
 } from '@/types'
 import { md5, generateSalt } from '@/utils/crypto'
 
 function getSubsonicAuth() {
   const state = useAuthStore.getState()
   let username = state.user?.username || ''
-  let pass = state.subsonicPassword
-  if (!pass && typeof window !== 'undefined') {
-    // Fallback to sessionStorage in case state was rehydrated without the in-memory value.
-    pass = window.sessionStorage.getItem('subsonic_pass')
+  // ALWAYS read password from sessionStorage for reliability
+  // Zustand state can be stale after page refresh
+  let pass = ''
+  if (typeof window !== 'undefined') {
+    pass = window.sessionStorage.getItem('subsonic_pass') || ''
   }
 
   if (!username && typeof window !== 'undefined') {
@@ -80,7 +81,13 @@ export const adminApi = {
     const token = pass ? md5(pass + salt) : ''
     const url = `/rest/getNowPlaying?u=${encodeURIComponent(user)}&t=${token}&s=${salt}&v=1.16.1&c=sonata-ui&f=json${jwt && !pass ? `&jwt=${jwt}` : ''}`
     return api.get(url).then(r => r.data)
-  }
+  },
+
+  // Server Settings
+  getSettings: () => api.get<ServerSettings>('/api/auth/settings/').then(r => r.data),
+  updateSettings: (data: Partial<ServerSettings>) => api.patch<ServerSettings>('/api/auth/settings/', data).then(r => r.data),
+  regenerateSecretKey: () => api.post('/api/auth/settings/regenerate-secret/').then(r => r.data),
+  regenerateEncryptionKey: () => api.post('/api/auth/settings/regenerate-encryption/').then(r => r.data),
 }
 
 // ── Music library ─────────────────────────────────────────────────────────────
@@ -127,6 +134,41 @@ export const radioApi = {
   delete: (id: number) => api.delete(`/api/radio/${id}/`),
 }
 
+// ── Upload ────────────────────────────────────────────────────────────────────
+
+export interface UploadFileResult {
+  name: string
+  status: 'ok' | 'skipped' | 'error'
+  reason?: string
+  path?: string
+}
+
+export const uploadApi = {
+  /**
+   * Upload audio files to the server.
+   * @param files       Array of File objects  
+   * @param onProgress  Called with 0-100 overall progress as bytes are sent
+   */
+  uploadFiles: (
+    files: File[],
+    onProgress?: (pct: number) => void,
+  ): Promise<UploadFileResult[]> => {
+    const form = new FormData()
+    for (const f of files) form.append('files', f)
+    return api
+      .post<{ results: UploadFileResult[] }>('/api/upload/', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (evt) => {
+          if (onProgress && evt.total) {
+            onProgress(Math.round((evt.loaded / evt.total) * 100))
+          }
+        },
+      })
+      .then(r => r.data.results)
+  },
+}
+
+
 // ── Stream URL helpers ────────────────────────────────────────────────────────
 
 export function streamUrl(songId: number): string {
@@ -134,6 +176,13 @@ export function streamUrl(songId: number): string {
   const salt = generateSalt()
   const token = pass ? md5(pass + salt) : ''
   return `/rest/stream?id=${songId}&u=${encodeURIComponent(user)}&t=${token}&s=${salt}&v=1.16.1&c=sonata-ui&f=json${jwt && !pass ? `&jwt=${jwt}` : ''}`
+}
+
+export function lyricsUrl(songId: number): string {
+  const { user, pass, jwt } = getSubsonicAuth()
+  const salt = generateSalt()
+  const token = pass ? md5(pass + salt) : ''
+  return `/rest/getLyrics?id=${songId}&u=${encodeURIComponent(user)}&t=${token}&s=${salt}&v=1.16.1&c=sonata-ui&f=json${jwt && !pass ? `&jwt=${jwt}` : ''}`
 }
 
 export function coverArtUrl(id: string, size?: number): string {

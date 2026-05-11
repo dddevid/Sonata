@@ -2,6 +2,7 @@
 
 import os
 import re
+import logging
 import mimetypes
 import subprocess
 import xml.etree.ElementTree as ET
@@ -226,9 +227,34 @@ def serve_cover_art(art_id, size=None):
                 cover_path = artist.image_path
             elif artist.image_url:
                 import requests
+                import ipaddress
+                import urllib.parse
                 from django.conf import settings
+
+                def _is_safe_url(url):
+                    """Reject non-HTTP(S) URLs and requests to private/loopback addresses (SSRF prevention)."""
+                    try:
+                        parsed = urllib.parse.urlparse(url)
+                        if parsed.scheme not in ('http', 'https'):
+                            return False
+                        hostname = parsed.hostname or ''
+                        try:
+                            addr = ipaddress.ip_address(hostname)
+                            if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+                                return False
+                        except ValueError:
+                            blocked = ('localhost', '0.0.0.0')
+                            if hostname.lower() in blocked or hostname.endswith('.local'):
+                                return False
+                        return True
+                    except Exception:
+                        return False
+
+                if not _is_safe_url(artist.image_url):
+                    return _add_cache_header(_sonata_placeholder())
+
                 try:
-                    r = requests.get(artist.image_url, timeout=10)
+                    r = requests.get(artist.image_url, timeout=10, allow_redirects=True)
                     r.raise_for_status()
                     
                     media_root = getattr(settings, 'MEDIA_ROOT', './media')
@@ -406,13 +432,118 @@ def _generate_playlist_collage(paths, size=None):
 
 # ── getLyrics ──────────────────────────────────────────────────────────────────
 
+def _extract_lyrics(file_path):
+    """Extract lyrics from embedded tags or external .lrc file."""
+    try:
+        import mutagen
+        from mutagen.mp3 import MP3
+        from mutagen.id3 import ID3
+        from mutagen.flac import FLAC
+        from mutagen.mp4 import MP4
+        from mutagen.oggvorbis import OggVorbis
+
+        ext = os.path.splitext(file_path)[1].lower()
+        lyrics = None
+
+        # 1. Try embedded lyrics
+        if ext == '.mp3':
+            try:
+                audio = ID3(file_path)
+                # USLT = Unsynchronized lyrics, SYLT = Synchronized lyrics
+                for key in audio.keys():
+                    if key.startswith('USLT'):
+                        lyrics = str(audio[key])
+                        break
+            except Exception:
+                pass
+        elif ext == '.flac':
+            try:
+                audio = FLAC(file_path)
+                if 'LYRICS' in audio:
+                    lyrics = audio['LYRICS'][0]
+            except Exception:
+                pass
+        elif ext in ('.m4a', '.mp4'):
+            try:
+                audio = MP4(file_path)
+                # ©lyr = lyrics atom
+                if '\u00a9lyr' in audio:
+                    lyrics = str(audio['\u00a9lyr'][0])
+            except Exception:
+                pass
+        elif ext == '.ogg':
+            try:
+                audio = OggVorbis(file_path)
+                if 'LYRICS' in audio:
+                    lyrics = audio['LYRICS'][0]
+            except Exception:
+                pass
+
+        if lyrics:
+            return lyrics, False  # (lyrics, is_synced)
+
+        # 2. Try external .lrc file
+        lrc_path = os.path.splitext(file_path)[0] + '.lrc'
+        if os.path.exists(lrc_path):
+            with open(lrc_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+                return content, True  # LRC files are synchronized
+
+    except Exception as e:
+        logging.error(f"Failed to extract lyrics for {file_path}: {e}")
+
+    return None, False
+
+
 @csrf_exempt
 @require_http_methods(['GET', 'POST'])
 @subsonic_auth
 def get_lyrics(request):
+    p = request.GET if request.method == 'GET' else request.POST
+    song_id = p.get('id')
+    artist = p.get('artist', '')
+    title = p.get('title', '')
+
+    lyrics_text = None
+    is_synced = False
+
+    # If song_id provided, try to get lyrics from file
+    if song_id:
+        try:
+            song = Song.objects.get(pk=song_id)
+            
+            # 1. First check for stored lyrics_path from scanner
+            if song.lyrics_path and os.path.exists(song.lyrics_path):
+                try:
+                    with open(song.lyrics_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        lyrics_text = f.read()
+                        is_synced = song.lyrics_path.lower().endswith('.lrc')
+                except Exception as e:
+                    logging.warning(f"Could not read lyrics file {song.lyrics_path}: {e}")
+            
+            # 2. Fallback: try embedded lyrics and sibling .lrc file
+            if not lyrics_text and os.path.exists(song.path):
+                lyrics_text, is_synced = _extract_lyrics(song.path)
+                
+        except Song.DoesNotExist:
+            pass
+
+    # Build response
     def xml_builder(root):
-        ET.SubElement(root, 'lyrics')
-    return make_ok(request, data={'lyrics': {}}, xml_builder=xml_builder)
+        lyrics_el = ET.SubElement(root, 'lyrics')
+        if lyrics_text:
+            lyrics_el.text = lyrics_text
+
+    data = {
+        'lyrics': {
+            'value': lyrics_text or '',
+            'artist': artist,
+            'title': title,
+            'isSynced': is_synced,
+        }
+    }
+
+    return make_ok(request, data=data, xml_builder=xml_builder)
 
 
 # ── getAvatar ──────────────────────────────────────────────────────────────────

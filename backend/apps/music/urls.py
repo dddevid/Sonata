@@ -36,4 +36,7 @@ urlpatterns = [
 
     # Server logs (admin only)
     path('logs/', views.server_logs),
+
+    # Upload
+    path('upload/', views.upload_files),
 ]

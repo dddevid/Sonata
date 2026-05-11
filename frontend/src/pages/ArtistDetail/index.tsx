@@ -76,8 +76,8 @@ export default function ArtistDetail() {
             style={{ backgroundImage: `url(${bgUrl})` }}
           />
         )}
-        <div className="relative px-6 py-10 flex items-end gap-8">
-          <div className="w-40 h-40 rounded-full bg-surface flex items-center justify-center overflow-hidden shadow-2xl flex-shrink-0">
+        <div className="relative px-4 md:px-6 py-8 md:py-10 flex flex-col md:flex-row md:items-end gap-4 md:gap-8">
+          <div className="w-28 h-28 md:w-40 md:h-40 rounded-full bg-surface flex items-center justify-center overflow-hidden shadow-2xl flex-shrink-0 self-center md:self-auto">
             {artist.id ? (
               <CoverArt artId={`ar-${artist.id}`} size={600} alt={artist.name} className="w-full h-full object-cover" />
             ) : (
@@ -86,7 +86,7 @@ export default function ArtistDetail() {
           </div>
           <div className="min-w-0">
             <p className="text-xs font-medium text-text-muted uppercase tracking-wider mb-1">Artist</p>
-            <h1 className="text-4xl font-bold text-text-primary">{artist.name}</h1>
+            <h1 className="text-2xl md:text-4xl font-bold text-text-primary">{artist.name}</h1>
             <p className="text-sm text-text-secondary mt-2">
               {artist.album_count} album{artist.album_count !== 1 ? 's' : ''}
               {typeof (artist as any).song_count === 'number' && ` · ${(artist as any).song_count} songs`}

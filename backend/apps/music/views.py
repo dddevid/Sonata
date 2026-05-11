@@ -545,3 +545,179 @@ def server_logs(request):
     with _LOG_LOCK:
         entries = list(_LOG_BUFFER)[-limit:]
     return Response({'logs': entries})
+
+
+# ── Upload ─────────────────────────────────────────────────────────────────────
+
+_UPLOAD_AUDIO_EXTENSIONS = {
+    '.mp3', '.flac', '.ogg', '.oga', '.opus', '.m4a', '.mp4',
+    '.aac', '.wav', '.aiff', '.aif', '.wma',
+}
+
+
+@api_view(['POST'])
+def upload_files(request):
+    """
+    Upload one or more audio files. Admin-only.
+
+    Accepts multipart/form-data with:
+      files  — one or more audio files
+      path   — (optional) relative path hint from browser drag-and-drop
+               (used to preserve Artist/Album folder structure)
+
+    For each file the view:
+      1. Reads embedded tags with mutagen
+      2. Determines destination: MUSIC_UPLOAD_ROOT/<Artist>/<Album>/<filename>
+      3. Writes the file to disk (skips if identical file already exists)
+      4. Upserts into the DB via _upsert_song()
+
+    Returns a JSON array of per-file results.
+    """
+    import shutil
+    import logging
+    from mutagen import File as MutagenFile
+    from django.conf import settings
+
+    err = _admin_required(request)
+    if err:
+        return err
+
+    log = logging.getLogger(__name__)
+
+    upload_root = getattr(settings, 'MUSIC_UPLOAD_ROOT', os.path.join(settings.MEDIA_ROOT, 'uploads'))
+    os.makedirs(upload_root, exist_ok=True)
+
+    files = request.FILES.getlist('files')
+    if not files:
+        return Response({'detail': 'No files provided.'}, status=400)
+
+    results = []
+
+    for uploaded_file in files:
+        original_name = uploaded_file.name  # may include relative path from browser
+        ext = os.path.splitext(original_name)[1].lower()
+
+        if ext not in _UPLOAD_AUDIO_EXTENSIONS:
+            results.append({'name': original_name, 'status': 'skipped', 'reason': 'not an audio file'})
+            continue
+
+        # Read tags
+        try:
+            audio = MutagenFile(uploaded_file, easy=True)
+        except Exception:
+            audio = None
+
+        def tag(key, default=''):
+            if audio and audio.tags:
+                val = audio.tags.get(key)
+                return str(val[0]).strip() if val else default
+            return default
+
+        title      = tag('title') or os.path.splitext(os.path.basename(original_name))[0]
+        artist_name = tag('artist') or 'Unknown Artist'
+        album_name  = tag('album')  or 'Unknown Album'
+        genre_name  = tag('genre')
+        year_str    = tag('date') or tag('year')
+        track_str   = tag('tracknumber')
+        disc_str    = tag('discnumber')
+
+        year  = None
+        track = None
+        disc  = None
+        try:
+            year = int(year_str.split('-')[0]) if year_str else None
+        except (ValueError, AttributeError):
+            pass
+        try:
+            track = int(track_str.split('/')[0]) if track_str else None
+        except (ValueError, AttributeError):
+            pass
+        try:
+            disc = int(disc_str.split('/')[0]) if disc_str else None
+        except (ValueError, AttributeError):
+            pass
+
+        duration = 0
+        bit_rate = 0
+        size = uploaded_file.size
+        if audio and hasattr(audio, 'info') and audio.info:
+            duration = int(audio.info.length)
+            bit_rate = int(getattr(audio.info, 'bitrate', 0) / 1000)
+
+        suffix = ext.lstrip('.')
+
+        # Sanitise path components
+        def safe(name):
+            return ''.join(c if c not in r'\/:*?"<>|' else '_' for c in name).strip() or '_'
+
+        dest_dir = os.path.join(upload_root, safe(artist_name), safe(album_name))
+        os.makedirs(dest_dir, exist_ok=True)
+        dest_path = os.path.join(dest_dir, safe(os.path.basename(original_name)))
+
+        # Write file (seek back to start after mutagen read)
+        try:
+            uploaded_file.seek(0)
+        except Exception:
+            pass
+
+        try:
+            with open(dest_path, 'wb') as f:
+                for chunk in uploaded_file.chunks():
+                    f.write(chunk)
+        except Exception as e:
+            log.error('Upload write failed for %s: %s', original_name, e)
+            results.append({'name': original_name, 'status': 'error', 'reason': str(e)})
+            continue
+
+        # Ensure music folder record exists
+        folder_path = upload_root
+        folder, _ = MusicFolder.objects.get_or_create(
+            path=folder_path,
+            defaults={'name': 'Uploads'},
+        )
+
+        # Extract cover art (reuse scanner logic)
+        from .scanner import Scanner
+        scanner = Scanner()
+        # Upsert via shared helper — pass cover extraction result if any
+        song_data = {
+            'path':         dest_path,
+            'folder':       folder_path,
+            'title':        title,
+            'artist':       artist_name,
+            'album':        album_name,
+            'genre':        genre_name,
+            'year':         year,
+            'track':        track,
+            'disc_number':  disc,
+            'duration':     duration,
+            'bit_rate':     bit_rate,
+            'size':         size,
+            'suffix':       suffix,
+            'content_type': f'audio/{suffix}',
+        }
+
+        try:
+            _upsert_song(song_data)
+            # Also attempt cover extraction (scanner._extract_cover needs an Album obj)
+            from .models import Album as AlbumModel
+            try:
+                from .models import Artist as ArtistModel
+                artist_obj = ArtistModel.objects.get(name=artist_name)
+                album_obj  = AlbumModel.objects.get(name=album_name, artist=artist_obj)
+                if not album_obj.cover_art_path:
+                    cover = scanner._extract_cover(dest_path, album_obj)
+                    if cover:
+                        album_obj.cover_art_path = cover
+                        album_obj.save(update_fields=['cover_art_path'])
+            except AlbumModel.DoesNotExist:
+                pass
+
+            log.info('Uploaded and indexed: %s → %s', original_name, dest_path)
+            results.append({'name': original_name, 'status': 'ok', 'path': dest_path})
+        except Exception as e:
+            log.error('Indexing failed for %s: %s', original_name, e)
+            results.append({'name': original_name, 'status': 'error', 'reason': str(e)})
+
+    return Response({'results': results})
+

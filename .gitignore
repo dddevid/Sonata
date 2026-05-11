@@ -17,9 +17,11 @@ env/
 *.log
 local_settings.py
 db.sqlite3
+*.sqlite3
 media/
 staticfiles/
 .env
+backend/data/           # Auto-generated SECRET_KEY and sensitive settings
 
 # Go
 scanner/bin/

@@ -1,16 +1,47 @@
 import os
 from pathlib import Path
 from datetime import timedelta
-from dotenv import load_dotenv
-
-load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-insecure-change-me-in-production')
-DEBUG = os.environ.get('DEBUG', 'True') == 'True'
+# ── Dynamic Settings System ──────────────────────────────────────────────────
+# Load SECRET_KEY early (from file or generate new)
+from .dynamic_settings import ensure_secret_key_exists, get_db_settings
+SECRET_KEY = ensure_secret_key_exists()
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+# Load remaining settings from database after Django is configured
+_db_settings = None
+
+def reload_settings():
+    """Reload settings from database. Called by settings API endpoint."""
+    global _db_settings
+    from config.dynamic_settings import invalidate_cache
+    invalidate_cache()
+    _db_settings = get_db_settings()
+    if _db_settings:
+        from django.conf import settings as _s
+        from datetime import timedelta
+        _s.DEBUG = _db_settings.get('DEBUG', False)
+        _s.SERVER_NAME = _db_settings.get('SERVER_NAME', 'Sonata')
+        _s.SUBSONIC_ENCRYPTION_KEY = _db_settings.get('SUBSONIC_ENCRYPTION_KEY')
+        _s.CORS_ALLOWED_ORIGINS = _db_settings.get('CORS_ALLOWED_ORIGINS', [])
+        _s.CORS_ALLOW_ALL_ORIGINS = _s.DEBUG and not _s.CORS_ALLOWED_ORIGINS
+        _s.REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'] = {
+            'user': _db_settings.get('THROTTLE_USER_RATE', '1000/day'),
+            'anon': _db_settings.get('THROTTLE_ANON_RATE', '100/day'),
+        }
+        _s.SIMPLE_JWT.update({
+            'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(_db_settings.get('ACCESS_TOKEN_LIFETIME_MINUTES', 1440))),
+            'REFRESH_TOKEN_LIFETIME': timedelta(days=int(_db_settings.get('REFRESH_TOKEN_LIFETIME_DAYS', 7))),
+        })
+    return _db_settings
+
+# Try to load from DB immediately (will work after migrations)
+_db_settings = get_db_settings()
+
+# Use DB settings if available, otherwise defaults
+DEBUG = _db_settings.get('DEBUG', False) if _db_settings else False
+ALLOWED_HOSTS = ['*']  # Allow all hosts - CORS handles domain restrictions
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -21,6 +52,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'apps.accounts',
     'apps.music',
@@ -59,8 +91,8 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
-# Database
-_db_url = os.environ.get('DATABASE_URL', 'sqlite:///db.sqlite3')
+# Database - configurable via environment or default to SQLite
+_db_url = os.environ.get('DATABASE_URL', f'sqlite:///{BASE_DIR / "db.sqlite3"}')
 if _db_url.startswith('postgresql://') or _db_url.startswith('postgres://'):
     import re
     _m = re.match(r'postgres(?:ql)?://([^:]+):([^@]+)@([^/]+)/(.+)', _db_url)
@@ -86,6 +118,45 @@ else:
 
 AUTH_USER_MODEL = 'accounts.User'
 
+# ── LDAP Authentication ───────────────────────────────────────────────────────
+LDAP_ENABLED = _db_settings.get('LDAP_ENABLED', False) if _db_settings else False
+
+if LDAP_ENABLED:
+    import ldap
+    from django_auth_ldap.config import LDAPSearch, GroupOfNamesType
+
+    AUTH_LDAP_SERVER_URI = _db_settings.get('LDAP_SERVER_URI', 'ldap://localhost') if _db_settings else 'ldap://localhost'
+    AUTH_LDAP_BIND_DN = _db_settings.get('LDAP_BIND_DN', '') if _db_settings else ''
+    AUTH_LDAP_BIND_PASSWORD = _db_settings.get('LDAP_BIND_PASSWORD', '') if _db_settings else ''
+
+    # User search configuration
+    _ldap_search_base = _db_settings.get('LDAP_USER_SEARCH_BASE', 'ou=users,dc=example,dc=com') if _db_settings else 'ou=users,dc=example,dc=com'
+    _ldap_search_filter = _db_settings.get('LDAP_USER_SEARCH_FILTER', '(uid=%(user)s)') if _db_settings else '(uid=%(user)s)'
+    AUTH_LDAP_USER_SEARCH = LDAPSearch(_ldap_search_base, ldap.SCOPE_SUBTREE, _ldap_search_filter)
+
+    # Attribute mappings
+    AUTH_LDAP_USER_ATTR_MAP = {
+        "username": _db_settings.get('LDAP_ATTR_USERNAME', 'uid') if _db_settings else 'uid',
+        "first_name": _db_settings.get('LDAP_ATTR_FIRST_NAME', 'givenName') if _db_settings else 'givenName',
+        "last_name": _db_settings.get('LDAP_ATTR_LAST_NAME', 'sn') if _db_settings else 'sn',
+        "email": _db_settings.get('LDAP_ATTR_EMAIL', 'mail') if _db_settings else 'mail',
+    }
+
+    # Auto-create users and set default role
+    AUTH_LDAP_ALWAYS_UPDATE_USER = True
+    AUTH_LDAP_CREATE_USER = _db_settings.get('LDAP_AUTO_CREATE_USERS', True) if _db_settings else True
+    LDAP_DEFAULT_ROLE = _db_settings.get('LDAP_DEFAULT_ROLE', 'user') if _db_settings else 'user'
+
+    # Add LDAP backend to authentication backends
+    AUTHENTICATION_BACKENDS = [
+        'django_auth_ldap.backend.LDAPBackend',
+        'django.contrib.auth.backends.ModelBackend',
+    ]
+else:
+    AUTHENTICATION_BACKENDS = [
+        'django.contrib.auth.backends.ModelBackend',
+    ]
+
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
@@ -103,17 +174,18 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 MEDIA_URL = '/media/'
-MEDIA_ROOT = os.environ.get('MEDIA_ROOT', str(BASE_DIR / 'media'))
+MEDIA_ROOT = str(BASE_DIR / 'media')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# CORS
-CORS_ALLOW_ALL_ORIGINS = DEBUG
-CORS_ALLOWED_ORIGINS = [
-    'http://localhost:5173',
-    'http://localhost:3000',
-    'http://127.0.0.1:5173',
-]
+# CORS - loaded from database settings
+# In production, specify exact origins. In debug, allow all.
+if _db_settings:
+    CORS_ALLOWED_ORIGINS = _db_settings.get('CORS_ALLOWED_ORIGINS', [])
+    CORS_ALLOW_ALL_ORIGINS = DEBUG and not CORS_ALLOWED_ORIGINS
+else:
+    CORS_ALLOWED_ORIGINS = ['http://localhost:5173', 'http://localhost:3000']
+    CORS_ALLOW_ALL_ORIGINS = DEBUG
 CORS_ALLOW_CREDENTIALS = True
 
 # REST Framework
@@ -132,33 +204,42 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.AnonRateThrottle',
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'user': os.environ.get('DRF_USER_THROTTLE_RATE', '1000/day'),
-        'anon': os.environ.get('DRF_ANON_THROTTLE_RATE', '100/day'),
+        'user': _db_settings.get('THROTTLE_USER_RATE', '1000/day') if _db_settings else '1000/day',
+        'anon': _db_settings.get('THROTTLE_ANON_RATE', '100/day') if _db_settings else '100/day',
     },
 }
 
-# JWT
+# JWT - settings loaded from database
+_access_token_minutes = _db_settings.get('ACCESS_TOKEN_LIFETIME_MINUTES', 1440) if _db_settings else 1440
+_refresh_token_days = _db_settings.get('REFRESH_TOKEN_LIFETIME_DAYS', 7) if _db_settings else 7
+
 SIMPLE_JWT = {
-    # Shorter lifetimes by default; can be overridden via env.
-    'ACCESS_TOKEN_LIFETIME': timedelta(
-        minutes=int(os.environ.get('ACCESS_TOKEN_LIFETIME_MINUTES', '1440'))
-    ),  # default 1 day
-    'REFRESH_TOKEN_LIFETIME': timedelta(
-        days=int(os.environ.get('REFRESH_TOKEN_LIFETIME_DAYS', '7'))
-    ),  # default 7 days
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(_access_token_minutes)),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=int(_refresh_token_days)),
     'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-# Scanner service
-SCANNER_URL = os.environ.get('SCANNER_URL', 'http://localhost:4040')
-SCANNER_SECRET = os.environ.get('SCANNER_SECRET', 'scanner-secret')
-
-# App config
-SERVER_NAME = os.environ.get('SERVER_NAME', 'Sonata')
+# App config - loaded from database
+SERVER_NAME = _db_settings.get('SERVER_NAME', 'Sonata') if _db_settings else 'Sonata'
 SERVER_VERSION = '1.0.0'
 SUBSONIC_API_VERSION = '1.16.1'
 
-# Security
-SUBSONIC_ENCRYPTION_KEY = os.environ.get('SUBSONIC_ENCRYPTION_KEY')
+# Security - loaded from database (auto-generated if not set)
+SUBSONIC_ENCRYPTION_KEY = _db_settings.get('SUBSONIC_ENCRYPTION_KEY') if _db_settings else None
+
+# Upload limits — allow large audio files (default Django max is 2.5 MB in memory)
+DATA_UPLOAD_MAX_MEMORY_SIZE = 200 * 1024 * 1024         # 200 MB total request body
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024          # 10 MB per file before temp-file switch
+
+# Folder where uploaded music files are stored (created automatically)
+MUSIC_UPLOAD_ROOT = str(BASE_DIR / 'media' / 'uploads')
+
+# Security hardening
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_BROWSER_XSS_FILTER = True
+X_FRAME_OPTIONS = 'DENY'
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = True
 

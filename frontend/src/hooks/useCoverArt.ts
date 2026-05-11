@@ -13,7 +13,7 @@ export function useCoverArtBlob(artId?: string, size?: number) {
       })
       return res.data as Blob
     },
-    staleTime: 1000 * 60 * 60, // 1h
+
     retry: 1,
   })
 }

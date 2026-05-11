@@ -141,3 +141,26 @@ export interface LoginResponse {
   access: string
   refresh: string
 }
+
+export interface ServerSettings {
+  allow_self_register: boolean
+  server_name: string
+  debug: boolean
+  cors_allowed_origins: string
+  access_token_lifetime_minutes: number
+  refresh_token_lifetime_days: number
+  throttle_user_rate: string
+  throttle_anon_rate: string
+  // LDAP
+  ldap_enabled: boolean
+  ldap_server_uri: string
+  ldap_bind_dn: string
+  ldap_bind_password: string
+  ldap_user_search_base: string
+  ldap_user_search_filter: string
+  ldap_group_search_base: string
+  ldap_group_search_filter: string
+  ldap_require_group: string
+  ldap_group_type: string
+  ldap_superuser_group: string
+}

@@ -3,6 +3,8 @@ import { Outlet } from 'react-router-dom'
 import Sidebar from '@/components/Sidebar'
 import Player from '@/components/Player'
 import NowPlayingAdmin from '@/components/NowPlayingAdmin'
+import BottomNav from '@/components/BottomNav'
+import UploadZone from '@/components/UploadZone'
 import { usePlayerStore } from '@/stores/playerStore'
 
 export default function Layout() {
@@ -26,7 +28,7 @@ export default function Layout() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-base">
-      {/* Sidebar */}
+      {/* Sidebar — hidden on mobile */}
       <Sidebar />
 
       {/* Main content */}
@@ -36,10 +38,15 @@ export default function Layout() {
         </div>
         {/* Player bar */}
         <Player />
+        {/* Bottom nav — mobile only */}
+        <BottomNav />
       </main>
 
       {/* Admin Overlay */}
       <NowPlayingAdmin />
+
+      {/* Drag-and-drop upload — admin only */}
+      <UploadZone />
     </div>
   )
 }

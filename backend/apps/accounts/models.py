@@ -41,9 +41,16 @@ class User(AbstractUser):
         return self.role == self.Role.ADMIN or self.is_superuser
 
     def _get_fernet(self):
+        # First try settings, then fallback to database
         key = getattr(settings, 'SUBSONIC_ENCRYPTION_KEY', None)
         if not key:
-            # Fallback for dev if not set (not recommended for production)
+            # Fallback to database directly (needed at startup before settings loaded)
+            try:
+                settings_obj = ServerSettings.get()
+                key = settings_obj.subsonic_encryption_key
+            except Exception:
+                pass
+        if not key:
             return None
         try:
             return Fernet(key.encode() if isinstance(key, str) else key)
@@ -79,14 +86,28 @@ class User(AbstractUser):
 
         f = self._get_fernet()
         if not f:
-            # Insecure configuration: refuse to silently store plain-text
+            # Auto-generate key if missing
+            try:
+                settings_obj = ServerSettings.get()
+                if not settings_obj.subsonic_encryption_key:
+                    settings_obj.generate_subsonic_encryption_key()
+                    settings_obj.save(update_fields=['subsonic_encryption_key'])
+                # Update settings and retry
+                from django.conf import settings
+                settings.SUBSONIC_ENCRYPTION_KEY = settings_obj.subsonic_encryption_key
+                f = self._get_fernet()
+            except Exception as e:
+                logging.error(f"Failed to generate encryption key: {e}")
+                raise ValueError("SUBSONIC_ENCRYPTION_KEY is not configured; cannot set subsonic password securely.")
+
+        if not f:
             raise ValueError("SUBSONIC_ENCRYPTION_KEY is not configured; cannot set subsonic password securely.")
 
         try:
             self.subsonic_password = f.encrypt(raw_password.encode()).decode()
         except Exception as e:
             logging.error(f"Failed to encrypt subsonic password for {self.username}: {e}")
-            self.subsonic_password = raw_password
+            raise
 
     def save(self, *args, **kwargs):
         # First user ever becomes admin
@@ -103,10 +124,48 @@ class User(AbstractUser):
 class ServerSettings(models.Model):
     """
     Singleton-style settings for the Sonata server.
-    Currently controls whether self-registration is allowed.
+    All configuration stored in database - editable by admin via API.
     """
 
+    # Core settings
+    secret_key = models.CharField(max_length=100, blank=True, help_text="Auto-generated Django SECRET_KEY")
+    debug = models.BooleanField(default=False, help_text="Debug mode (never enable in production)")
+    server_name = models.CharField(max_length=100, default='Sonata')
+
+    # Registration settings
     allow_self_register = models.BooleanField(default=True)
+
+    # CORS settings
+    cors_allowed_origins = models.TextField(
+        blank=True,
+        default='http://localhost:5173\nhttp://localhost:3000',
+        help_text="One origin per line"
+    )
+
+    # JWT settings
+    access_token_lifetime_minutes = models.IntegerField(default=1440, help_text="Default: 1440 (1 day)")
+    refresh_token_lifetime_days = models.IntegerField(default=7, help_text="Default: 7 days")
+
+    # Rate limiting
+    throttle_user_rate = models.CharField(max_length=20, default='1000/day')
+    throttle_anon_rate = models.CharField(max_length=20, default='100/day')
+
+    # LDAP settings (optional)
+    ldap_enabled = models.BooleanField(default=False)
+    ldap_server_uri = models.CharField(max_length=255, blank=True, default='ldap://localhost')
+    ldap_bind_dn = models.CharField(max_length=255, blank=True)
+    ldap_bind_password = models.CharField(max_length=255, blank=True)
+    ldap_user_search_base = models.CharField(max_length=255, blank=True, default='ou=users,dc=example,dc=com')
+    ldap_user_search_filter = models.CharField(max_length=255, blank=True, default='(uid=%(user)s)')
+    ldap_attr_username = models.CharField(max_length=50, blank=True, default='uid')
+    ldap_attr_email = models.CharField(max_length=50, blank=True, default='mail')
+    ldap_attr_first_name = models.CharField(max_length=50, blank=True, default='givenName')
+    ldap_attr_last_name = models.CharField(max_length=50, blank=True, default='sn')
+    ldap_auto_create_users = models.BooleanField(default=True)
+    ldap_default_role = models.CharField(max_length=10, choices=User.Role.choices, default=User.Role.USER)
+
+    # Security
+    subsonic_encryption_key = models.CharField(max_length=100, blank=True, help_text="Key for encrypting Subsonic passwords")
 
     class Meta:
         verbose_name = "Server settings"
@@ -119,3 +178,21 @@ class ServerSettings(models.Model):
     def get(cls):
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj
+
+    def get_cors_origins_list(self):
+        """Return CORS origins as a list."""
+        if not self.cors_allowed_origins:
+            return []
+        return [origin.strip() for origin in self.cors_allowed_origins.split('\n') if origin.strip()]
+
+    def generate_secret_key(self):
+        """Generate a new random SECRET_KEY."""
+        import secrets
+        self.secret_key = secrets.token_urlsafe(50)
+        return self.secret_key
+
+    def generate_subsonic_encryption_key(self):
+        """Generate a Fernet-compatible encryption key."""
+        from cryptography.fernet import Fernet
+        self.subsonic_encryption_key = Fernet.generate_key().decode()
+        return self.subsonic_encryption_key

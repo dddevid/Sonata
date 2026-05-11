@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Users, FolderOpen, BarChart2, RefreshCw, Plus, Trash2, Edit2, X, Check, Loader2, Terminal, ChevronDown } from 'lucide-react'
+import { Users, FolderOpen, BarChart2, RefreshCw, Plus, Trash2, Edit2, X, Check, Loader2, Terminal, ChevronDown, Settings, Key, RotateCw } from 'lucide-react'
 import { adminApi } from '@/api'
+import type { ServerSettings } from '@/types'
 
-type Tab = 'overview' | 'users' | 'libraries' | 'logs'
+type Tab = 'overview' | 'users' | 'libraries' | 'logs' | 'settings'
 
 // ---------- Overview ----------
 function Overview() {
@@ -388,6 +389,280 @@ function LogsTab() {
   )
 }
 
+// ---------- Settings ----------
+function SettingsTab() {
+  const qc = useQueryClient()
+  const { data: settings, isLoading } = useQuery({
+    queryKey: ['admin', 'settings'],
+    queryFn: adminApi.getSettings,
+  })
+  const [form, setForm] = useState<Partial<ServerSettings>>({})
+  const [activeSection, setActiveSection] = useState<'general' | 'auth' | 'ldap'>('general')
+
+  useEffect(() => {
+    if (settings) setForm(settings)
+  }, [settings])
+
+  const updateMutation = useMutation({
+    mutationFn: () => adminApi.updateSettings(form),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'settings'] })
+    },
+  })
+
+  const regenerateSecret = useMutation({
+    mutationFn: adminApi.regenerateSecretKey,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'settings'] })
+    },
+  })
+
+  const regenerateEncryption = useMutation({
+    mutationFn: adminApi.regenerateEncryptionKey,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'settings'] })
+    },
+  })
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={24} className="animate-spin text-text-muted" />
+      </div>
+    )
+  }
+
+  const SectionButton = ({ id, label }: { id: 'general' | 'auth' | 'ldap'; label: string }) => (
+    <button
+      onClick={() => setActiveSection(id)}
+      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+        activeSection === id
+          ? 'bg-primary/20 text-primary-light'
+          : 'text-text-muted hover:text-text-primary hover:bg-elevated'
+      }`}
+    >
+      {label}
+    </button>
+  )
+
+  const Input = ({ label, type = 'text', value, onChange, placeholder, disabled }: any) => (
+    <div className="space-y-1.5">
+      <label className="text-xs font-medium text-text-secondary">{label}</label>
+      <input
+        type={type}
+        value={value || ''}
+        onChange={onChange}
+        placeholder={placeholder}
+        disabled={disabled}
+        className="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-primary-light disabled:opacity-50"
+      />
+    </div>
+  )
+
+  const Switch = ({ label, checked, onChange }: any) => (
+    <div className="flex items-center justify-between py-2">
+      <span className="text-sm text-text-primary">{label}</span>
+      <button
+        onClick={() => onChange(!checked)}
+        className={`relative w-11 h-6 rounded-full transition-colors ${checked ? 'bg-primary' : 'bg-border'}`}
+      >
+        <span className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${checked ? 'translate-x-5' : ''}`} />
+      </button>
+    </div>
+  )
+
+  return (
+    <div className="space-y-6">
+      {/* Section Tabs */}
+      <div className="flex gap-2">
+        <SectionButton id="general" label="General" />
+        <SectionButton id="auth" label="Auth & Rate Limits" />
+        <SectionButton id="ldap" label="LDAP" />
+      </div>
+
+      {/* General Settings */}
+      {activeSection === 'general' && (
+        <div className="bg-elevated border border-border rounded-xl p-5 space-y-5">
+          <h3 className="text-sm font-medium text-text-primary">General Settings</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="Server Name"
+              value={form.server_name}
+              onChange={(e: any) => setForm({ ...form, server_name: e.target.value })}
+              placeholder="Sonata"
+            />
+            <div />
+            <Switch
+              label="Debug Mode"
+              checked={form.debug}
+              onChange={(v: boolean) => setForm({ ...form, debug: v })}
+            />
+            <Switch
+              label="Allow Self Registration"
+              checked={form.allow_self_register}
+              onChange={(v: boolean) => setForm({ ...form, allow_self_register: v })}
+            />
+          </div>
+          <Input
+            label="CORS Allowed Origins (comma-separated)"
+            value={form.cors_allowed_origins}
+            onChange={(e: any) => setForm({ ...form, cors_allowed_origins: e.target.value })}
+            placeholder="http://localhost:3000,https://example.com"
+          />
+        </div>
+      )}
+
+      {/* Auth Settings */}
+      {activeSection === 'auth' && (
+        <div className="bg-elevated border border-border rounded-xl p-5 space-y-5">
+          <h3 className="text-sm font-medium text-text-primary">Authentication & Rate Limits</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="Access Token Lifetime (minutes)"
+              type="number"
+              value={form.access_token_lifetime_minutes}
+              onChange={(e: any) => setForm({ ...form, access_token_lifetime_minutes: parseInt(e.target.value) })}
+            />
+            <Input
+              label="Refresh Token Lifetime (days)"
+              type="number"
+              value={form.refresh_token_lifetime_days}
+              onChange={(e: any) => setForm({ ...form, refresh_token_lifetime_days: parseInt(e.target.value) })}
+            />
+            <Input
+              label="User Throttle Rate"
+              value={form.throttle_user_rate}
+              onChange={(e: any) => setForm({ ...form, throttle_user_rate: e.target.value })}
+              placeholder="100/minute"
+            />
+            <Input
+              label="Anonymous Throttle Rate"
+              value={form.throttle_anon_rate}
+              onChange={(e: any) => setForm({ ...form, throttle_anon_rate: e.target.value })}
+              placeholder="20/minute"
+            />
+          </div>
+
+          {/* Secret Keys */}
+          <div className="border-t border-border pt-4 mt-4">
+            <h4 className="text-xs font-medium text-text-secondary mb-3">Secret Keys</h4>
+            <div className="flex gap-3">
+              <button
+                onClick={() => regenerateSecret.mutate()}
+                disabled={regenerateSecret.isPending}
+                className="flex items-center gap-2 px-4 py-2 bg-elevated hover:bg-border border border-border rounded-lg text-sm text-text-primary transition-colors disabled:opacity-50"
+              >
+                {regenerateSecret.isPending ? <Loader2 size={14} className="animate-spin" /> : <Key size={14} />}
+                Regenerate Secret Key
+              </button>
+              <button
+                onClick={() => regenerateEncryption.mutate()}
+                disabled={regenerateEncryption.isPending}
+                className="flex items-center gap-2 px-4 py-2 bg-elevated hover:bg-border border border-border rounded-lg text-sm text-text-primary transition-colors disabled:opacity-50"
+              >
+                {regenerateEncryption.isPending ? <Loader2 size={14} className="animate-spin" /> : <RotateCw size={14} />}
+                Regenerate Encryption Key
+              </button>
+            </div>
+            <p className="text-xs text-text-muted mt-2">
+              Warning: Regenerating keys will log out all users and require them to re-authenticate.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* LDAP Settings */}
+      {activeSection === 'ldap' && (
+        <div className="bg-elevated border border-border rounded-xl p-5 space-y-5">
+          <h3 className="text-sm font-medium text-text-primary">LDAP Authentication</h3>
+          <Switch
+            label="Enable LDAP"
+            checked={form.ldap_enabled}
+            onChange={(v: boolean) => setForm({ ...form, ldap_enabled: v })}
+          />
+          {form.ldap_enabled && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-border">
+              <Input
+                label="LDAP Server URI"
+                value={form.ldap_server_uri}
+                onChange={(e: any) => setForm({ ...form, ldap_server_uri: e.target.value })}
+                placeholder="ldap://ldap.example.com:389"
+              />
+              <Input
+                label="Bind DN"
+                value={form.ldap_bind_dn}
+                onChange={(e: any) => setForm({ ...form, ldap_bind_dn: e.target.value })}
+                placeholder="cn=admin,dc=example,dc=com"
+              />
+              <Input
+                label="Bind Password"
+                type="password"
+                value={form.ldap_bind_password}
+                onChange={(e: any) => setForm({ ...form, ldap_bind_password: e.target.value })}
+                placeholder="••••••••"
+              />
+              <Input
+                label="User Search Base"
+                value={form.ldap_user_search_base}
+                onChange={(e: any) => setForm({ ...form, ldap_user_search_base: e.target.value })}
+                placeholder="ou=users,dc=example,dc=com"
+              />
+              <Input
+                label="User Search Filter"
+                value={form.ldap_user_search_filter}
+                onChange={(e: any) => setForm({ ...form, ldap_user_search_filter: e.target.value })}
+                placeholder="(uid=%(user)s)"
+              />
+              <Input
+                label="Group Search Base"
+                value={form.ldap_group_search_base}
+                onChange={(e: any) => setForm({ ...form, ldap_group_search_base: e.target.value })}
+                placeholder="ou=groups,dc=example,dc=com"
+              />
+              <Input
+                label="Group Search Filter"
+                value={form.ldap_group_search_filter}
+                onChange={(e: any) => setForm({ ...form, ldap_group_search_filter: e.target.value })}
+                placeholder="(objectClass=groupOfNames)"
+              />
+              <Input
+                label="Require Group"
+                value={form.ldap_require_group}
+                onChange={(e: any) => setForm({ ...form, ldap_require_group: e.target.value })}
+                placeholder="cn=sonata_users,ou=groups,dc=example,dc=com"
+              />
+              <Input
+                label="Group Type"
+                value={form.ldap_group_type}
+                onChange={(e: any) => setForm({ ...form, ldap_group_type: e.target.value })}
+                placeholder="GroupOfNamesType"
+              />
+              <Input
+                label="Superuser Group"
+                value={form.ldap_superuser_group}
+                onChange={(e: any) => setForm({ ...form, ldap_superuser_group: e.target.value })}
+                placeholder="cn=sonata_admins,ou=groups,dc=example,dc=com"
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Save Button */}
+      <div className="flex justify-end">
+        <button
+          onClick={() => updateMutation.mutate()}
+          disabled={updateMutation.isPending}
+          className="flex items-center gap-2 bg-primary-light hover:bg-primary disabled:opacity-50 text-white px-5 py-2 rounded-lg transition-colors"
+        >
+          {updateMutation.isPending && <Loader2 size={14} className="animate-spin" />}
+          Save Settings
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ---------- Main Admin Page ----------
 export default function Admin() {
   const [tab, setTab] = useState<Tab>('overview')
@@ -397,6 +672,7 @@ export default function Admin() {
     { key: 'users', label: 'Users', icon: <Users size={15} /> },
     { key: 'libraries', label: 'Libraries', icon: <FolderOpen size={15} /> },
     { key: 'logs', label: 'Logs', icon: <Terminal size={15} /> },
+    { key: 'settings', label: 'Settings', icon: <Settings size={15} /> },
   ]
 
   return (
@@ -428,6 +704,7 @@ export default function Admin() {
       {tab === 'users' && <UsersTab />}
       {tab === 'libraries' && <LibrariesTab />}
       {tab === 'logs' && <LogsTab />}
+      {tab === 'settings' && <SettingsTab />}
     </div>
   )
 }

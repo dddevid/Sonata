@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from .models import User, ServerSettings
-from .serializers import UserSerializer, RegisterSerializer, ChangePasswordSerializer
+from .serializers import UserSerializer, RegisterSerializer, ChangePasswordSerializer, ServerSettingsSerializer
 
 
 def _tokens_for_user(user):
@@ -42,7 +42,7 @@ def register(request):
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 def login(request):
-    """Authenticate and return JWT tokens."""
+    """Authenticate and return JWT tokens. Supports both local and LDAP users."""
     username = request.data.get('username', '').strip()
     password = request.data.get('password', '')
 
@@ -55,14 +55,27 @@ def login(request):
     if not user.is_active:
         return Response({'detail': 'Account is disabled.'}, status=403)
 
-    # Ensure Subsonic password is initialized for legacy users so that
+    # Check if this is an LDAP-authenticated user (no usable password hash means LDAP)
+    is_ldap_user = not user.has_usable_password()
+
+    # Ensure Subsonic password is initialized and synced for users so that
     # /rest/* endpoints (including cover art) work correctly.
+    # For LDAP users, we use their LDAP password for Subsonic auth.
+    needs_update = False
     if not user.subsonic_password:
+        needs_update = True
+    else:
+        # Verify stored subsonic password matches current password
+        current_subsonic = user.get_subsonic_password()
+        if current_subsonic != password:
+            # Password changed since last login - re-sync
+            needs_update = True
+
+    if needs_update:
         try:
             user.set_subsonic_password(password)
             user.save(update_fields=['subsonic_password'])
         except Exception:
-            # If something goes wrong here, don't block normal JWT login.
             pass
 
     tokens = _tokens_for_user(user)
@@ -129,6 +142,7 @@ def server_info(request):
         'version': settings.SERVER_VERSION,
         'users_exist': users_exist,
         'allow_self_register': allow_self_register,
+        'ldap_enabled': getattr(settings, 'LDAP_ENABLED', False),
     })
 
 
@@ -197,3 +211,67 @@ def manage_user(request, user_id):
         user.is_staff = request.data['role'] == 'admin'
     user.save()
     return Response(UserSerializer(user).data)
+
+
+# --- Admin server settings management ---
+
+@api_view(['GET', 'PATCH'])
+def server_settings(request):
+    """Get or update server settings — admin only."""
+    err = _require_admin(request)
+    if err:
+        return err
+
+    settings_obj = ServerSettings.get()
+
+    if request.method == 'GET':
+        serializer = ServerSettingsSerializer(settings_obj)
+        return Response(serializer.data)
+
+    # PATCH - update settings
+    serializer = ServerSettingsSerializer(settings_obj, data=request.data, partial=True)
+    if serializer.is_valid():
+        serializer.save()
+        # Reload Django settings from database
+        from config.settings import reload_settings
+        reload_settings()
+        return Response(serializer.data)
+    return Response(serializer.errors, status=400)
+
+
+@api_view(['POST'])
+def regenerate_secret_key(request):
+    """Generate a new SECRET_KEY — admin only. Requires restart."""
+    err = _require_admin(request)
+    if err:
+        return err
+
+    settings_obj = ServerSettings.get()
+    new_key = settings_obj.generate_secret_key()
+    settings_obj.save(update_fields=['secret_key'])
+
+    return Response({
+        'detail': 'New SECRET_KEY generated. Server restart required to apply.',
+        'key_preview': new_key[:8] + '...' + new_key[-8:]
+    })
+
+
+@api_view(['POST'])
+def regenerate_encryption_key(request):
+    """Generate a new Subsonic encryption key — admin only."""
+    err = _require_admin(request)
+    if err:
+        return err
+
+    settings_obj = ServerSettings.get()
+    new_key = settings_obj.generate_subsonic_encryption_key()
+    settings_obj.save(update_fields=['subsonic_encryption_key'])
+
+    # Update running settings
+    from django.conf import settings
+    settings.SUBSONIC_ENCRYPTION_KEY = new_key
+
+    return Response({
+        'detail': 'New encryption key generated and applied.',
+        'key_preview': new_key[:8] + '...' + new_key[-8:]
+    })

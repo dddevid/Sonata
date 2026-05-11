@@ -76,6 +76,7 @@ class Song(models.Model):
     suffix = models.CharField(max_length=10, blank=True)   # mp3, flac …
     content_type = models.CharField(max_length=100, blank=True)
     path = models.CharField(max_length=4096, unique=True)
+    lyrics_path = models.CharField(max_length=4096, blank=True)  # Path to .lrc file
     mb_id = models.CharField(max_length=36, blank=True)
     play_count = models.BigIntegerField(default=0)
     last_played = models.DateTimeField(null=True, blank=True)

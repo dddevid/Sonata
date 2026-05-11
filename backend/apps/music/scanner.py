@@ -11,6 +11,8 @@ AUDIO_EXTENSIONS = {
     '.wav', '.aiff', '.aif', '.wma', '.alac', '.ape',
 }
 
+LYRICS_EXTENSIONS = {'.lrc', '.txt'}  # Supported lyrics file formats
+
 class Scanner:
     def __init__(self):
         self.is_scanning = False
@@ -31,14 +33,32 @@ class Scanner:
                 if not os.path.isdir(folder_path):
                     logging.warning(f"Music folder not found: {folder_path}")
                     continue
+                
+                # First pass: collect all lyrics files in this folder
+                lyrics_map = {}  # (dirpath, base_name_lower) -> lyrics_path
+                for dirpath, _dirs, filenames in os.walk(folder_path):
+                    for filename in filenames:
+                        ext = os.path.splitext(filename)[1].lower()
+                        if ext in LYRICS_EXTENSIONS:
+                            full_path = os.path.join(dirpath, filename)
+                            base_name = os.path.splitext(filename)[0].lower()
+                            lyrics_map[(dirpath, base_name)] = full_path
+                            logging.info(f"Found lyrics file: {full_path}")
+                
+                # Second pass: process audio files
                 for dirpath, _dirs, filenames in os.walk(folder_path):
                     for filename in filenames:
                         ext = os.path.splitext(filename)[1].lower()
                         if ext not in AUDIO_EXTENSIONS:
                             continue
                         full_path = os.path.join(dirpath, filename)
+                        
+                        # Check for associated lyrics file in same directory
+                        base_name = os.path.splitext(filename)[0].lower()
+                        lyrics_path = lyrics_map.get((dirpath, base_name), '')
+                        
                         try:
-                            self.process_file(full_path, folder_path)
+                            self.process_file(full_path, folder_path, lyrics_path)
                             self.count += 1
                         except Exception as e:
                             logging.warning(f"Could not scan {full_path}: {e}")
@@ -49,7 +69,7 @@ class Scanner:
             scan_status.save()
             self.is_scanning = False
 
-    def process_file(self, path, folder_path):
+    def process_file(self, path, folder_path, lyrics_path=''):
         audio = MutagenFile(path, easy=True)
         if audio is None:
             return
@@ -106,6 +126,7 @@ class Scanner:
                 'size': size,
                 'suffix': suffix,
                 'content_type': f'audio/{suffix}',
+                'lyrics_path': lyrics_path,
             },
         )
 

@@ -15,4 +15,8 @@ urlpatterns = [
     path('users/', views.list_users),
     path('users/create/', views.create_user),
     path('users/<int:user_id>/', views.manage_user),
+    # Admin server settings
+    path('settings/', views.server_settings),
+    path('settings/regenerate-secret/', views.regenerate_secret_key),
+    path('settings/regenerate-encryption/', views.regenerate_encryption_key),
 ]

@@ -3,7 +3,7 @@
 > [!WARNING]
 > This project is in alpha: expect bugs, frequent changes, and incomplete features. Use at your own risk!
 
-A self-hosted music streaming server fully compatible with the **OpenSubsonic API**, featuring a modern React web UI and a high-performance Go-based media scanner.
+A self-hosted music streaming server fully compatible with the **OpenSubsonic API**, featuring a modern React web UI and a Python-based media scanner with mutagen for metadata extraction.
 
 ## Features
 
@@ -11,10 +11,11 @@ A self-hosted music streaming server fully compatible with the **OpenSubsonic AP
 - Modern, minimal dark web UI inspired by Navidrome
 - Admin panel: user management, music libraries, scan control
 - **First registered user automatically becomes admin**
-- High-performance file scanner written in **Go**
-- On-the-fly audio transcoding via **FFmpeg** (Go service)
+- High-performance file scanner written in **Python** with mutagen
+- On-the-fly audio transcoding via **FFmpeg**
 - Range-request streaming with cover art extraction
 - Playlist management, starred items, ratings, scrobble, bookmarks
+- **LDAP authentication** support with automatic user provisioning
 
 ## Architecture
 
@@ -25,23 +26,20 @@ A self-hosted music streaming server fully compatible with the **OpenSubsonic AP
 └──────────────┘                      │   Backend   │
                                       │  (Port 8000)│
 ┌──────────────┐     REST /api/*      │             │
-│  React Web   │ ──────────────────►  │             │
-│      UI      │                      └──────┬──────┘
-└──────────────┘                             │ Internal API
-                                      ┌──────▼──────┐
-                                      │  Go Scanner │
-                                      │ (Port 4040) │
-                                      └─────────────┘
+│  React Web   │ ──────────────────►  │   +Scanner  │
+│      UI      │                      │   (Python)  │
+└──────────────┘                      └─────────────┘
 ```
 
 ## Tech Stack
 
 | Layer      | Technology                          |
 |------------|-------------------------------------|
-| Backend    | Python 3.11 + Django 4.2 + DRF     |
-| Scanner    | Go 1.21 (gin, dhowden/tag, mutagen) |
+| Backend    | Python 3.11 + Django 4.2 + DRF      |
+| Scanner    | Python + mutagen (integrated)       |
 | Frontend   | React 18 + TypeScript + Tailwind    |
-| Database   | SQLite (dev) / PostgreSQL (prod)    |
+| Database   | SQLite (dev)                        |
+| Auth       | Local + JWT + LDAP (optional)       |
 
 ## Quick Start
 
@@ -67,11 +65,7 @@ python manage.py runserver
 ```
 
 ### Scanner
-```bash
-cd scanner
-go build -o bin/sonata-scanner .
-./bin/sonata-scanner
-```
+The scanner is integrated into the Django backend. No separate service needed.
 
 ### Frontend
 ```bash
@@ -97,9 +91,55 @@ All endpoints available at `/rest/` (with or without `.view` suffix):
 - **Sharing**: `getShares`, `createShare`, `updateShare`, `deleteShare`
 - **Scan**: `getScanStatus`, `startScan`
 
-## Environment Variables
+## Configuration
 
-See `backend/.env.example` for all available configuration options.
+Sonata uses a **database-first configuration system**. All settings (except database connection) are stored in the database and editable via the Admin UI.
+
+### How it works
+
+1. **Auto-generated security keys**: On first startup, the server automatically generates and securely stores:
+   - `SECRET_KEY` (Django security key)
+   - `SUBSONIC_ENCRYPTION_KEY` (for password encryption)
+
+2. **Admin UI configuration**: After logging in as admin, go to **Admin → Server Settings** to configure:
+   - Server name, debug mode
+   - User registration settings
+   - CORS origins
+   - JWT token lifetimes
+   - Rate limiting
+   - LDAP authentication
+   - Regenerate security keys
+
+### Environment Variables (Optional)
+
+Only set these if you need to override defaults:
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `DATABASE_URL` | PostgreSQL connection (optional) | `sqlite:///db.sqlite3` |
+| `SECRET_KEY` | Override auto-generated key | *(auto-generated)* |
+
+### LDAP Authentication
+
+LDAP can be configured via the Admin UI (Server Settings → LDAP). No `.env` file needed!
+
+**Quick setup:**
+1. Log in as admin
+2. Go to Admin → Server Settings
+3. Enable LDAP and fill in your server details:
+   - Server URI: `ldap://ldap.example.com`
+   - Bind DN: Service account for searching
+   - User Search Base: `ou=users,dc=example,dc=com`
+4. Save and LDAP users can immediately log in
+
+**System dependencies** (if using LDAP):
+```bash
+# macOS
+brew install openldap
+
+# Ubuntu/Debian
+sudo apt-get install libldap2-dev libsasl2-dev
+```
 
 ## License
 

@@ -15,8 +15,16 @@
     height: 100%;
     background-color: #080808;
     color: #f1f5f9;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Geist', 'Inter', 'Helvetica Neue', Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    letter-spacing: -0.006em;
+    font-feature-settings: 'cv01' 1, 'cv02' 1, 'cv03' 1, 'cv04' 1, 'kern' 1, 'liga' 1;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    letter-spacing: -0.016em;
   }
 
   ::-webkit-scrollbar {
@@ -56,9 +64,30 @@
   .animate-fade-in {
     animation: fade-in 0.2s ease-out;
   }
+  /* iPhone notch / home indicator padding */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
 }
+
+@layer base {
+  /* Faster tap response on mobile */
+  button, a {
+    touch-action: manipulation;
+  }
+}
+
 
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-right {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out;
 }

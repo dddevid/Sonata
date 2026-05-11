@@ -61,15 +61,21 @@ fi
 cd ..
 info "Frontend built and placed in backend/static."
 
-# ── 3. Go scanner ────────────────────────────────────────────────────────────
-info "Building Go scanner service…"
-if command -v go &>/dev/null; then
-  cd scanner
-  go build -o ../sonata-scanner ./... 
-  cd ..
-  info "Scanner binary: ./sonata-scanner"
+# ── 3. System dependencies check ─────────────────────────────────────────────
+info "Checking system dependencies…"
+
+# Check for FFmpeg (needed for audio transcoding)
+if command -v ffmpeg &>/dev/null; then
+  info "FFmpeg found."
 else
-  warn "go not found — skipping scanner build. Install Go 1.21+ and run: cd scanner && go build -o ../sonata-scanner ./..."
+  warn "FFmpeg not found. Install it for audio transcoding support."
+fi
+
+# Check for LDAP dependencies (optional)
+if command -v ldapsearch &>/dev/null || pkg-config --exists ldap 2>/dev/null; then
+  info "LDAP libraries found."
+else
+  warn "LDAP libraries not found. Install openldap/libldap2-dev for LDAP authentication support."
 fi
 
 # ── Done ─────────────────────────────────────────────────────────────────────
@@ -77,7 +83,6 @@ echo ""
 info "Setup complete! To start Sonata:"
 echo ""
 echo "  Terminal 1 (backend):  cd backend && source .venv/bin/activate && python manage.py runserver 0.0.0.0:8000"
-echo "  Terminal 2 (scanner):  DJANGO_URL=http://localhost:8000 ./sonata-scanner"
-echo "  Frontend (dev):        cd frontend && npm run dev"
+echo "  Frontend (dev):          cd frontend && npm run dev"
 echo ""
-echo "  Or use Docker Compose: docker compose up --build"
+echo "  Or use Docker Compose:  docker compose up --build"

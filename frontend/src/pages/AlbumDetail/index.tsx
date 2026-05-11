@@ -118,8 +118,8 @@ export default function AlbumDetail() {
       {/* Hero */}
       <div className="relative">
         <AlbumHeroBackground albumId={album?.id} />
-        <div className="relative px-6 py-10 flex items-end gap-8 z-10">
-          <div className="w-48 h-48 rounded-xl overflow-hidden shadow-[0_8px_30px_rgb(0,0,0,0.5)] flex-shrink-0 bg-elevated border border-border/50 transition-transform duration-300 hover:scale-105">
+        <div className="relative px-4 md:px-6 py-8 md:py-10 flex flex-col md:flex-row md:items-end gap-5 md:gap-8 z-10">
+          <div className="w-32 h-32 md:w-48 md:h-48 rounded-xl overflow-hidden shadow-[0_8px_30px_rgb(0,0,0,0.5)] flex-shrink-0 bg-elevated border border-border/50 transition-transform duration-300 hover:scale-105 self-center md:self-auto">
             {album.id ? (
               <CoverArt artId={`al-${album.id}`} size={600} alt={album.name} className="w-full h-full object-cover" />
             ) : (
@@ -128,10 +128,10 @@ export default function AlbumDetail() {
           </div>
           <div className="min-w-0">
             <p className="text-xs font-medium text-text-muted uppercase tracking-wider mb-1">Album</p>
-            <h1 className="text-4xl font-bold text-text-primary leading-tight">{album.name}</h1>
+            <h1 className="text-2xl md:text-4xl font-bold text-text-primary leading-tight">{album.name}</h1>
             <Link
               to={`/artists/${album.artist}`}
-              className="text-lg text-text-secondary hover:text-text-primary transition-colors mt-1 inline-block"
+              className="text-base md:text-lg text-text-secondary hover:text-text-primary transition-colors mt-1 inline-block"
             >
               {album.artist_name}
             </Link>
@@ -140,7 +140,7 @@ export default function AlbumDetail() {
               {album.song_count} song{album.song_count !== 1 ? 's' : ''} · {formatDuration(totalDuration)}
               {album.genre && ` · ${album.genre}`}
             </p>
-            <div className="flex items-center gap-3 mt-6">
+            <div className="flex items-center gap-3 mt-5">
               <button
                 onClick={handlePlayAll}
                 className="flex items-center gap-2 bg-primary-light hover:bg-primary text-white text-sm font-semibold px-6 py-2.5 rounded-full transition-colors"

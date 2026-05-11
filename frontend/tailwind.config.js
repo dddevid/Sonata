@@ -31,7 +31,21 @@ export default {
         warning: '#f59e0b',
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        sans: [
+          '-apple-system',
+          'BlinkMacSystemFont',
+          'Geist',
+          'Inter',
+          '"Helvetica Neue"',
+          'Arial',
+          'sans-serif',
+        ],
+      },
+      letterSpacing: {
+        tightest: '-0.022em',
+        tighter: '-0.016em',
+        tight: '-0.011em',
+        normal: '-0.006em',
       },
       animation: {
         'spin-slow': 'spin 8s linear infinite',

@@ -30,7 +30,7 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="w-56 shrink-0 flex flex-col bg-surface border-r border-border">
+    <aside className="hidden md:flex w-56 shrink-0 flex-col bg-surface border-r border-border">
       {/* Logo */}
       <div className="px-5 py-5 border-b border-border">
         <div className="flex items-center gap-2.5">
@@ -86,8 +86,8 @@ export default function Sidebar() {
       </nav>
 
       {/* User section */}
-      <div className="px-3 py-3 border-t border-border">
-        <div className="flex items-center gap-2.5 px-2 py-2">
+      <div className="h-20 px-3 border-t border-border flex items-center shrink-0">
+        <div className="flex items-center gap-2.5 px-2 w-full">
           <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
             <span className="text-xs font-semibold text-primary-light uppercase">
               {user?.username?.[0] ?? '?'}

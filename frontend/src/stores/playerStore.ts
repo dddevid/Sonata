@@ -210,7 +210,7 @@ function _startSeekInterval(set: (partial: Partial<PlayerState>) => void, get: (
     if (howl?.playing()) {
       set({ currentTime: howl.seek() as number })
     }
-  }, 500)
+  }, 100)
 }
 
 function _clearSeekInterval() {
