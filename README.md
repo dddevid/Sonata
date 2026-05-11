@@ -143,4 +143,4 @@ sudo apt-get install libldap2-dev libsasl2-dev
 
 ## License
 
-MIT
+This project is open source and available under the **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)** License. See the [LICENSE](LICENSE) file for details.
